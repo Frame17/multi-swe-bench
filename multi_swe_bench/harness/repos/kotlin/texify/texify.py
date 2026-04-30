@@ -11,7 +11,7 @@ from multi_swe_bench.harness.repos.kotlin.junit_parser import (
 )
 
 
-class AnkiAndroidImageBase(Image):
+class TeXiFyImageBase(Image):
     def __init__(self, pr: PullRequest, config: Config):
         self._pr = pr
         self._config = config
@@ -53,6 +53,8 @@ class AnkiAndroidImageBase(Image):
 WORKDIR /home/
 ENV DEBIAN_FRONTEND=noninteractive
 ENV TZ=Etc/UTC
+ENV LANG=C.UTF-8
+ENV LC_ALL=C.UTF-8
 
 RUN apt-get update && \\
   apt-get install -y --no-install-recommends \\
@@ -60,12 +62,7 @@ RUN apt-get update && \\
   git \\
   bash \\
   ca-certificates \\
-  unzip \\
-  libncurses6 \\
-  libvulkan1 \\
-  libpulse0 \\
-  libgl1 \\
-  libxml2 && \\
+  unzip && \\
   apt-get clean && \\
   rm -rf /var/lib/apt/lists/*
 
@@ -73,19 +70,6 @@ RUN $JAVA_HOME/bin/keytool -importkeystore -noprompt -trustcacerts \\
   -srckeystore /etc/ssl/certs/java/cacerts \\
   -destkeystore $JAVA_HOME/lib/security/cacerts \\
   -srcstorepass changeit -deststorepass changeit || true
-
-ENV ANDROID_SDK_ROOT=/opt/android-sdk \\
-    ANDROID_HOME=/opt/android-sdk \\
-    PATH=$PATH:/opt/android-sdk/cmdline-tools/latest/bin:/opt/android-sdk/platform-tools
-
-RUN mkdir -p ${{ANDROID_SDK_ROOT}}/cmdline-tools && \\
-  curl -o sdk-tools.zip https://dl.google.com/android/repository/commandlinetools-linux-11076708_latest.zip && \\
-  unzip sdk-tools.zip -d ${{ANDROID_SDK_ROOT}}/cmdline-tools && \\
-  mv ${{ANDROID_SDK_ROOT}}/cmdline-tools/cmdline-tools ${{ANDROID_SDK_ROOT}}/cmdline-tools/latest && \\
-  rm sdk-tools.zip
-
-RUN yes | sdkmanager --licenses && \\
-  sdkmanager "platform-tools" "platforms;android-34" "build-tools;34.0.0"
 
 {code}
 
@@ -95,7 +79,7 @@ RUN git config --global --add safe.directory /home
 """
 
 
-class AnkiAndroidImageDefault(Image):
+class TeXiFyImageDefault(Image):
     def __init__(self, pr: PullRequest, config: Config):
         self._pr = pr
         self._config = config
@@ -109,7 +93,7 @@ class AnkiAndroidImageDefault(Image):
         return self._config
 
     def dependency(self) -> Image | None:
-        return AnkiAndroidImageBase(self.pr, self._config)
+        return TeXiFyImageBase(self.pr, self._config)
 
     def image_tag(self) -> str:
         return f"pr-{self.pr.number}"
@@ -171,7 +155,7 @@ bash /home/check_git_changes.sh
 git checkout {pr.base.sha}
 bash /home/check_git_changes.sh
 
-./gradlew clean jacocoUnitTestReport --continue --max-workers=2
+./gradlew clean test || true
 
 """.format(pr=self.pr),
             ),
@@ -183,7 +167,7 @@ set -e
 
 cd /home/{pr.repo}
 
-./gradlew clean jacocoUnitTestReport --continue || true
+./gradlew clean test --continue || true
 
 /home/kotlin_logs_collector.sh --root . --output /home/all-testsuites.xml
 cat /home/all-testsuites.xml
@@ -199,7 +183,7 @@ set -e
 cd /home/{pr.repo}
 git apply --whitespace=nowarn /home/test.patch
 
-./gradlew clean jacocoUnitTestReport --continue || true
+./gradlew clean test --continue || true
 
 /home/kotlin_logs_collector.sh --root . --output /home/all-testsuites.xml
 cat /home/all-testsuites.xml
@@ -215,7 +199,7 @@ set -e
 cd /home/{pr.repo}
 git apply --whitespace=nowarn /home/test.patch /home/fix.patch
 
-./gradlew clean jacocoUnitTestReport --continue || true
+./gradlew clean test --continue || true
 
 /home/kotlin_logs_collector.sh --root . --output /home/all-testsuites.xml
 cat /home/all-testsuites.xml
@@ -294,8 +278,8 @@ cat /home/all-testsuites.xml
 """
 
 
-@Instance.register("ankidroid", "Anki-Android")
-class AnkiAndroid(Instance):
+@Instance.register("Hannah-Sten", "TeXiFy-IDEA")
+class TeXiFyInstance(Instance):
     def __init__(self, pr: PullRequest, config: Config, *args, **kwargs):
         super().__init__()
         self._pr = pr
@@ -306,7 +290,7 @@ class AnkiAndroid(Instance):
         return self._pr
 
     def dependency(self) -> Optional[Image]:
-        return AnkiAndroidImageDefault(self.pr, self._config)
+        return TeXiFyImageDefault(self.pr, self._config)
 
     def run(self, run_cmd: str = "") -> str:
         if run_cmd:

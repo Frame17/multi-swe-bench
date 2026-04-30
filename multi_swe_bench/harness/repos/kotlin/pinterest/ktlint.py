@@ -1,9 +1,14 @@
 import re
+from pathlib import Path
 from typing import Optional, Union
 import textwrap
 from multi_swe_bench.harness.image import Config, File, Image
 from multi_swe_bench.harness.instance import Instance, TestResult
 from multi_swe_bench.harness.pull_request import PullRequest
+from multi_swe_bench.harness.repos.kotlin.junit_parser import (
+    parse_junit_from_log,
+    to_test_result,
+)
 
 
 class ktlintImageBase(Image):
@@ -20,7 +25,7 @@ class ktlintImageBase(Image):
         return self._config
 
     def dependency(self) -> Union[str, "Image"]:
-        return "saschpe/android-sdk:34-jdk21.0.6_7"
+        return "eclipse-temurin:21-jdk"
 
     def image_tag(self) -> str:
         return "base"
@@ -42,17 +47,46 @@ class ktlintImageBase(Image):
             code = f"COPY {self.pr.repo} /home/{self.pr.repo}"
 
         return f"""FROM {image_name}
-USER root
+
 {self.global_env}
 
 WORKDIR /home/
 ENV DEBIAN_FRONTEND=noninteractive
 ENV TZ=Etc/UTC
 
+RUN apt-get update && \
+  apt-get install -y --no-install-recommends \
+  curl \
+  git \
+  bash \
+  ca-certificates \
+  unzip && \
+  apt-get clean && \
+  rm -rf /var/lib/apt/lists/*
+
+RUN $JAVA_HOME/bin/keytool -importkeystore -noprompt -trustcacerts \
+  -srckeystore /etc/ssl/certs/java/cacerts \
+  -destkeystore $JAVA_HOME/lib/security/cacerts \
+  -srcstorepass changeit -deststorepass changeit || true
+
+ENV ANDROID_SDK_ROOT=/opt/android-sdk \
+    ANDROID_HOME=/opt/android-sdk \
+    PATH=$PATH:/opt/android-sdk/cmdline-tools/latest/bin:/opt/android-sdk/platform-tools
+
+RUN mkdir -p ${{ANDROID_SDK_ROOT}}/cmdline-tools && \
+  curl -o sdk-tools.zip https://dl.google.com/android/repository/commandlinetools-linux-11076708_latest.zip && \
+  unzip sdk-tools.zip -d ${{ANDROID_SDK_ROOT}}/cmdline-tools && \
+  mv ${{ANDROID_SDK_ROOT}}/cmdline-tools/cmdline-tools ${{ANDROID_SDK_ROOT}}/cmdline-tools/latest && \
+  rm sdk-tools.zip
+
+RUN yes | sdkmanager --licenses && \
+  sdkmanager "platform-tools" "platforms;android-34" "build-tools;34.0.0"
+
 {code}
 
 {self.clear_env}
 
+RUN git config --global --add safe.directory /home
 """
 
 
@@ -70,7 +104,7 @@ class ktlintImageBaseJDK17(Image):
         return self._config
 
     def dependency(self) -> Union[str, "Image"]:
-        return "saschpe/android-sdk:32-jdk17.0.8_7"
+        return "eclipse-temurin:17-jdk"
 
     def image_tag(self) -> str:
         return "base-JDK-17"
@@ -92,17 +126,46 @@ class ktlintImageBaseJDK17(Image):
             code = f"COPY {self.pr.repo} /home/{self.pr.repo}"
 
         return f"""FROM {image_name}
-USER root
+
 {self.global_env}
 
 WORKDIR /home/
 ENV DEBIAN_FRONTEND=noninteractive
 ENV TZ=Etc/UTC
 
+RUN apt-get update && \
+  apt-get install -y --no-install-recommends \
+  curl \
+  git \
+  bash \
+  ca-certificates \
+  unzip && \
+  apt-get clean && \
+  rm -rf /var/lib/apt/lists/*
+
+RUN $JAVA_HOME/bin/keytool -importkeystore -noprompt -trustcacerts \
+  -srckeystore /etc/ssl/certs/java/cacerts \
+  -destkeystore $JAVA_HOME/lib/security/cacerts \
+  -srcstorepass changeit -deststorepass changeit || true
+
+ENV ANDROID_SDK_ROOT=/opt/android-sdk \
+    ANDROID_HOME=/opt/android-sdk \
+    PATH=$PATH:/opt/android-sdk/cmdline-tools/latest/bin:/opt/android-sdk/platform-tools
+
+RUN mkdir -p ${{ANDROID_SDK_ROOT}}/cmdline-tools && \
+  curl -o sdk-tools.zip https://dl.google.com/android/repository/commandlinetools-linux-11076708_latest.zip && \
+  unzip sdk-tools.zip -d ${{ANDROID_SDK_ROOT}}/cmdline-tools && \
+  mv ${{ANDROID_SDK_ROOT}}/cmdline-tools/cmdline-tools ${{ANDROID_SDK_ROOT}}/cmdline-tools/latest && \
+  rm sdk-tools.zip
+
+RUN yes | sdkmanager --licenses && \
+  sdkmanager "platform-tools" "platforms;android-34" "build-tools;34.0.0"
+
 {code}
 
 {self.clear_env}
 
+RUN git config --global --add safe.directory /home
 """
 
 
@@ -122,7 +185,8 @@ class ktlintImageDefault(Image):
     def dependency(self) -> Image | None:
         if self.pr.number <= 2163:
             return ktlintImageBaseJDK17(self.pr, self._config)
-        return ktlintImageBase(self.pr, self._config)
+        else:
+            return ktlintImageBase(self.pr, self._config)
 
     def image_tag(self) -> str:
         return f"pr-{self.pr.number}"
@@ -131,6 +195,7 @@ class ktlintImageDefault(Image):
         return f"pr-{self.pr.number}"
 
     def files(self) -> list[File]:
+        logs_collector = (Path(__file__).parents[1] / "kotlin_logs_collector.sh").read_text(encoding="utf-8")
         return [
             File(
                 ".",
@@ -141,6 +206,11 @@ class ktlintImageDefault(Image):
                 ".",
                 "test.patch",
                 f"{self.pr.test_patch}",
+            ),
+            File(
+                ".",
+                "kotlin_logs_collector.sh",
+                logs_collector,
             ),
             File(
                 ".",
@@ -160,8 +230,7 @@ fi
 
 echo "check_git_changes: No uncommitted changes"
 exit 0
-
-""".format(),
+""",
             ),
             File(
                 ".",
@@ -170,11 +239,18 @@ exit 0
 set -e
 
 cd /home/{pr.repo}
+git config core.autocrlf input
+git config core.filemode false
+echo ".gitattributes" >> .git/info/exclude
+git add .
 git reset --hard
 bash /home/check_git_changes.sh
 git checkout {pr.base.sha}
 bash /home/check_git_changes.sh
-./gradlew clean test --max-workers 8 --continue || true
+
+export CLI_TEST_MAX_DURATION_IN_SECONDS=60
+./gradlew clean test
+
 """.format(pr=self.pr),
             ),
             File(
@@ -184,7 +260,12 @@ bash /home/check_git_changes.sh
 set -e
 
 cd /home/{pr.repo}
-./gradlew clean test --max-workers 8 --continue
+
+export CLI_TEST_MAX_DURATION_IN_SECONDS=60
+./gradlew clean test --continue || true
+
+/home/kotlin_logs_collector.sh --root . --output /home/all-testsuites.xml
+cat /home/all-testsuites.xml
 
 """.format(pr=self.pr),
             ),
@@ -196,7 +277,12 @@ set -e
 
 cd /home/{pr.repo}
 git apply --whitespace=nowarn /home/test.patch
-./gradlew clean test --max-workers 8 --continue
+
+export CLI_TEST_MAX_DURATION_IN_SECONDS=60
+./gradlew clean test --continue || true
+
+/home/kotlin_logs_collector.sh --root . --output /home/all-testsuites.xml
+cat /home/all-testsuites.xml
 
 """.format(pr=self.pr),
             ),
@@ -208,7 +294,12 @@ set -e
 
 cd /home/{pr.repo}
 git apply --whitespace=nowarn /home/test.patch /home/fix.patch
-./gradlew clean test --max-workers 8 --continue
+
+export CLI_TEST_MAX_DURATION_IN_SECONDS=60
+./gradlew clean test --continue || true
+
+/home/kotlin_logs_collector.sh --root . --output /home/all-testsuites.xml
+cat /home/all-testsuites.xml
 
 """.format(pr=self.pr),
             ),
@@ -223,7 +314,12 @@ git apply --whitespace=nowarn /home/test.patch /home/fix.patch
         for file in self.files():
             copy_commands += f"COPY {file.name} /home/\n"
 
-        prepare_commands = "RUN bash /home/prepare.sh"
+        prepare_commands = textwrap.dedent(
+            """
+            RUN bash /home/prepare.sh
+            RUN chmod +x /home/*.sh
+            """
+        ).strip()
         proxy_setup = ""
         proxy_cleanup = ""
 
@@ -312,51 +408,9 @@ class ktlint(Instance):
         return "bash /home/fix-run.sh"
 
     def parse_log(self, test_log: str) -> TestResult:
-        passed_tests = set()
-        failed_tests = set()
-        skipped_tests = set()
+        try:
+            status_map = parse_junit_from_log(test_log, drop_parameterized=True)
+        except ValueError as exc:
+            raise RuntimeError("Failed to locate JUnit XML in test log") from exc
 
-        passed_res = [
-            re.compile(r"^> Task :(\S+)$"),
-            re.compile(r"^> Task :(\S+) UP-TO-DATE$"),
-            re.compile(r"^> Task :(\S+) FROM-CACHE$"),
-            re.compile(r"^(.+ > .+) PASSED$"),
-        ]
-
-        failed_res = [
-            re.compile(r"^> Task :(\S+) FAILED$"),
-            re.compile(r"^(.+ > .+) FAILED$"),
-        ]
-
-        skipped_res = [
-            re.compile(r"^> Task :(\S+) SKIPPED$"),
-            re.compile(r"^> Task :(\S+) NO-SOURCE$"),
-            re.compile(r"^(.+ > .+) SKIPPED$"),
-        ]
-
-        for line in test_log.splitlines():
-            for passed_re in passed_res:
-                m = passed_re.match(line)
-                if m and m.group(1) not in failed_tests:
-                    passed_tests.add(m.group(1))
-
-            for failed_re in failed_res:
-                m = failed_re.match(line)
-                if m:
-                    failed_tests.add(m.group(1))
-                    if m.group(1) in passed_tests:
-                        passed_tests.remove(m.group(1))
-
-            for skipped_re in skipped_res:
-                m = skipped_re.match(line)
-                if m:
-                    skipped_tests.add(m.group(1))
-
-        return TestResult(
-            passed_count=len(passed_tests),
-            failed_count=len(failed_tests),
-            skipped_count=len(skipped_tests),
-            passed_tests=passed_tests,
-            failed_tests=failed_tests,
-            skipped_tests=skipped_tests,
-        )
+        return to_test_result(status_map)

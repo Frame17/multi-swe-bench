@@ -11,7 +11,7 @@ from multi_swe_bench.harness.repos.kotlin.junit_parser import (
 )
 
 
-class AnkiAndroidImageBase(Image):
+class OkHttpImageBase(Image):
     def __init__(self, pr: PullRequest, config: Config):
         self._pr = pr
         self._config = config
@@ -25,13 +25,13 @@ class AnkiAndroidImageBase(Image):
         return self._config
 
     def dependency(self) -> Union[str, "Image"]:
-        return "eclipse-temurin:21-jdk"
+        return "eclipse-temurin:17-jdk"
 
     def image_tag(self) -> str:
-        return "base"
+        return "base-JDK-17"
 
     def workdir(self) -> str:
-        return "base"
+        return "base-JDK-17"
 
     def files(self) -> list[File]:
         return []
@@ -54,37 +54,32 @@ WORKDIR /home/
 ENV DEBIAN_FRONTEND=noninteractive
 ENV TZ=Etc/UTC
 
-RUN apt-get update && \\
-  apt-get install -y --no-install-recommends \\
-  curl \\
-  git \\
-  bash \\
-  ca-certificates \\
-  unzip \\
-  libncurses6 \\
-  libvulkan1 \\
-  libpulse0 \\
-  libgl1 \\
-  libxml2 && \\
-  apt-get clean && \\
+RUN apt-get update && \
+  apt-get install -y --no-install-recommends \
+  curl \
+  unzip \
+  git \
+  bash \
+  ca-certificates && \
+  apt-get clean && \
   rm -rf /var/lib/apt/lists/*
 
-RUN $JAVA_HOME/bin/keytool -importkeystore -noprompt -trustcacerts \\
-  -srckeystore /etc/ssl/certs/java/cacerts \\
-  -destkeystore $JAVA_HOME/lib/security/cacerts \\
+RUN $JAVA_HOME/bin/keytool -importkeystore -noprompt -trustcacerts \
+  -srckeystore /etc/ssl/certs/java/cacerts \
+  -destkeystore $JAVA_HOME/lib/security/cacerts \
   -srcstorepass changeit -deststorepass changeit || true
 
-ENV ANDROID_SDK_ROOT=/opt/android-sdk \\
-    ANDROID_HOME=/opt/android-sdk \\
+ENV ANDROID_SDK_ROOT=/opt/android-sdk \
+    ANDROID_HOME=/opt/android-sdk \
     PATH=$PATH:/opt/android-sdk/cmdline-tools/latest/bin:/opt/android-sdk/platform-tools
 
-RUN mkdir -p ${{ANDROID_SDK_ROOT}}/cmdline-tools && \\
-  curl -o sdk-tools.zip https://dl.google.com/android/repository/commandlinetools-linux-11076708_latest.zip && \\
-  unzip sdk-tools.zip -d ${{ANDROID_SDK_ROOT}}/cmdline-tools && \\
-  mv ${{ANDROID_SDK_ROOT}}/cmdline-tools/cmdline-tools ${{ANDROID_SDK_ROOT}}/cmdline-tools/latest && \\
+RUN mkdir -p ${{ANDROID_SDK_ROOT}}/cmdline-tools && \
+  curl -o sdk-tools.zip https://dl.google.com/android/repository/commandlinetools-linux-11076708_latest.zip && \
+  unzip sdk-tools.zip -d ${{ANDROID_SDK_ROOT}}/cmdline-tools && \
+  mv ${{ANDROID_SDK_ROOT}}/cmdline-tools/cmdline-tools ${{ANDROID_SDK_ROOT}}/cmdline-tools/latest && \
   rm sdk-tools.zip
 
-RUN yes | sdkmanager --licenses && \\
+RUN yes | sdkmanager --licenses && \
   sdkmanager "platform-tools" "platforms;android-34" "build-tools;34.0.0"
 
 {code}
@@ -95,7 +90,86 @@ RUN git config --global --add safe.directory /home
 """
 
 
-class AnkiAndroidImageDefault(Image):
+class OkHttpImageBaseJDK8(Image):
+    def __init__(self, pr: PullRequest, config: Config):
+        self._pr = pr
+        self._config = config
+
+    @property
+    def pr(self) -> PullRequest:
+        return self._pr
+
+    @property
+    def config(self) -> Config:
+        return self._config
+
+    def dependency(self) -> Union[str, "Image"]:
+        return "eclipse-temurin:8-jdk"
+
+    def image_tag(self) -> str:
+        return "base-JDK-8"
+
+    def workdir(self) -> str:
+        return "base-JDK-8"
+
+    def files(self) -> list[File]:
+        return []
+
+    def dockerfile(self) -> str:
+        image_name = self.dependency()
+        if isinstance(image_name, Image):
+            image_name = image_name.image_full_name()
+
+        if self.config.need_clone:
+            code = f"RUN git clone https://github.com/{self.pr.org}/{self.pr.repo}.git /home/{self.pr.repo}"
+        else:
+            code = f"COPY {self.pr.repo} /home/{self.pr.repo}"
+
+        return f"""FROM {image_name}
+
+{self.global_env}
+
+WORKDIR /home/
+ENV DEBIAN_FRONTEND=noninteractive
+ENV TZ=Etc/UTC
+
+RUN apt-get update && \
+  apt-get install -y --no-install-recommends \
+  curl \
+  unzip \
+  git \
+  bash \
+  ca-certificates && \
+  apt-get clean && \
+  rm -rf /var/lib/apt/lists/*
+
+RUN $JAVA_HOME/bin/keytool -importkeystore -noprompt -trustcacerts \
+  -srckeystore /etc/ssl/certs/java/cacerts \
+  -destkeystore $JAVA_HOME/lib/security/cacerts \
+  -srcstorepass changeit -deststorepass changeit || true
+
+ENV ANDROID_SDK_ROOT=/opt/android-sdk \
+    ANDROID_HOME=/opt/android-sdk \
+    PATH=$PATH:/opt/android-sdk/cmdline-tools/latest/bin:/opt/android-sdk/platform-tools
+
+RUN mkdir -p ${{ANDROID_SDK_ROOT}}/cmdline-tools && \
+  curl -o sdk-tools.zip https://dl.google.com/android/repository/commandlinetools-linux-7302050_latest.zip && \
+  unzip sdk-tools.zip -d ${{ANDROID_SDK_ROOT}}/cmdline-tools && \
+  mv ${{ANDROID_SDK_ROOT}}/cmdline-tools/cmdline-tools ${{ANDROID_SDK_ROOT}}/cmdline-tools/latest && \
+  rm sdk-tools.zip
+
+RUN yes | sdkmanager --licenses && \
+  sdkmanager "platform-tools" "platforms;android-34" "build-tools;34.0.0"
+
+{code}
+
+{self.clear_env}
+
+RUN git config --global --add safe.directory /home
+"""
+
+
+class OkHttpImageDefault(Image):
     def __init__(self, pr: PullRequest, config: Config):
         self._pr = pr
         self._config = config
@@ -109,7 +183,10 @@ class AnkiAndroidImageDefault(Image):
         return self._config
 
     def dependency(self) -> Image | None:
-        return AnkiAndroidImageBase(self.pr, self._config)
+        if self.pr.number <= 6887:
+            return OkHttpImageBaseJDK8(self.pr, self._config)
+        else:
+            return OkHttpImageBase(self.pr, self._config)
 
     def image_tag(self) -> str:
         return f"pr-{self.pr.number}"
@@ -171,7 +248,8 @@ bash /home/check_git_changes.sh
 git checkout {pr.base.sha}
 bash /home/check_git_changes.sh
 
-./gradlew clean jacocoUnitTestReport --continue --max-workers=2
+export CI=true
+./gradlew clean test
 
 """.format(pr=self.pr),
             ),
@@ -183,7 +261,8 @@ set -e
 
 cd /home/{pr.repo}
 
-./gradlew clean jacocoUnitTestReport --continue || true
+export CI=true
+./gradlew clean test --continue || true
 
 /home/kotlin_logs_collector.sh --root . --output /home/all-testsuites.xml
 cat /home/all-testsuites.xml
@@ -199,7 +278,8 @@ set -e
 cd /home/{pr.repo}
 git apply --whitespace=nowarn /home/test.patch
 
-./gradlew clean jacocoUnitTestReport --continue || true
+export CI=true
+./gradlew clean test --continue || true
 
 /home/kotlin_logs_collector.sh --root . --output /home/all-testsuites.xml
 cat /home/all-testsuites.xml
@@ -215,7 +295,8 @@ set -e
 cd /home/{pr.repo}
 git apply --whitespace=nowarn /home/test.patch /home/fix.patch
 
-./gradlew clean jacocoUnitTestReport --continue || true
+export CI=true
+./gradlew clean test --continue || true
 
 /home/kotlin_logs_collector.sh --root . --output /home/all-testsuites.xml
 cat /home/all-testsuites.xml
@@ -294,8 +375,8 @@ cat /home/all-testsuites.xml
 """
 
 
-@Instance.register("ankidroid", "Anki-Android")
-class AnkiAndroid(Instance):
+@Instance.register("square", "okhttp")
+class OkHttp(Instance):
     def __init__(self, pr: PullRequest, config: Config, *args, **kwargs):
         super().__init__()
         self._pr = pr
@@ -306,7 +387,7 @@ class AnkiAndroid(Instance):
         return self._pr
 
     def dependency(self) -> Optional[Image]:
-        return AnkiAndroidImageDefault(self.pr, self._config)
+        return OkHttpImageDefault(self.pr, self._config)
 
     def run(self, run_cmd: str = "") -> str:
         if run_cmd:
