@@ -10,6 +10,37 @@ from multi_swe_bench.harness.repos.kotlin.junit_parser import (
     to_test_result,
 )
 
+# Flaky IntelliJ quickfix tests (JVM shared, nondeterministic stub-lookups).
+# DO NOT add lookalikes (f2p): LatexPrimitiveStyleInspectionTest.* (pr-2935),
+# LatexUnicodeInspectionQuickFix.* (pr-3920), LatexDuplicateDefinitionInspectionTest.testIfthenelse (pr-3810),
+# LatexFoldingTest.testSectionFolding (pr-3887), LatexNonBreakingSpaceInspectionTest.* (pr-3128).
+FLAKY_TESTS = (
+    "*LatexLabelConventionInspectionTest.testFigureLabelConventionQuickFix",
+    "*LatexLabelConventionInspectionTest.testSectionLabelConventionQuickFix",
+    "*LatexLabelConventionInspectionTest.testListingLabelConventionQuickFix",
+    "*LatexLabelConventionInspectionTest.testInputListingLabelConventionQuickFix",
+    "*LatexLabelConventionInspectionTest.testListingLabelConventionQuickFixWithGroup",
+)
+
+FLAKY_TESTS_INIT_SCRIPT = "/home/exclude-flaky-tests.gradle.kts"
+
+
+def _exclude_flaky_tests_init_script() -> str:
+    """Render a Kotlin-DSL Gradle init script excluding the flaky tests from every Test task."""
+    exclude_lines = "\n".join(
+        f'            excludeTestsMatching("{pat}")' for pat in FLAKY_TESTS
+    )
+    return f"""
+allprojects {{
+    tasks.withType<org.gradle.api.tasks.testing.Test>().configureEach {{
+        filter {{
+{exclude_lines}
+            isFailOnNoMatchingTests = false
+        }}
+    }}
+}}
+"""
+
 
 class TeXiFyImageBase(Image):
     def __init__(self, pr: PullRequest, config: Config):
@@ -121,6 +152,11 @@ class TeXiFyImageDefault(Image):
             ),
             File(
                 ".",
+                "exclude-flaky-tests.gradle.kts",
+                _exclude_flaky_tests_init_script(),
+            ),
+            File(
+                ".",
                 "check_git_changes.sh",
                 """#!/bin/bash
 set -e
@@ -155,9 +191,9 @@ bash /home/check_git_changes.sh
 git checkout {pr.base.sha}
 bash /home/check_git_changes.sh
 
-./gradlew clean test || true
+./gradlew clean test --init-script {init_script} || true
 
-""".format(pr=self.pr),
+""".format(pr=self.pr, init_script=FLAKY_TESTS_INIT_SCRIPT),
             ),
             File(
                 ".",
@@ -167,12 +203,12 @@ set -e
 
 cd /home/{pr.repo}
 
-./gradlew clean test --continue || true
+./gradlew clean test --continue --init-script {init_script} || true
 
 /home/kotlin_logs_collector.sh --root . --output /home/all-testsuites.xml
 cat /home/all-testsuites.xml
 
-""".format(pr=self.pr),
+""".format(pr=self.pr, init_script=FLAKY_TESTS_INIT_SCRIPT),
             ),
             File(
                 ".",
@@ -183,12 +219,12 @@ set -e
 cd /home/{pr.repo}
 git apply --whitespace=nowarn /home/test.patch
 
-./gradlew clean test --continue || true
+./gradlew clean test --continue --init-script {init_script} || true
 
 /home/kotlin_logs_collector.sh --root . --output /home/all-testsuites.xml
 cat /home/all-testsuites.xml
 
-""".format(pr=self.pr),
+""".format(pr=self.pr, init_script=FLAKY_TESTS_INIT_SCRIPT),
             ),
             File(
                 ".",
@@ -199,12 +235,12 @@ set -e
 cd /home/{pr.repo}
 git apply --whitespace=nowarn /home/test.patch /home/fix.patch
 
-./gradlew clean test --continue || true
+./gradlew clean test --continue --init-script {init_script} || true
 
 /home/kotlin_logs_collector.sh --root . --output /home/all-testsuites.xml
 cat /home/all-testsuites.xml
 
-""".format(pr=self.pr),
+""".format(pr=self.pr, init_script=FLAKY_TESTS_INIT_SCRIPT),
             ),
         ]
 
