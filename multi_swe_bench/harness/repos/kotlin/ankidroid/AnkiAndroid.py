@@ -54,6 +54,14 @@ WORKDIR /home/
 ENV DEBIAN_FRONTEND=noninteractive
 ENV TZ=Etc/UTC
 
+# Run the suite in AnkiDroid's "CI mode". The build sets BuildConfig.CI from
+# `System.getenv("CI") == "true"`, and RobolectricTest installs
+# IgnoreFlakyTestsInCIRule, which deterministically SKIPS tests annotated
+# @Flaky(...) (e.g. CardBrowserTest "FindReplace - replaces text based on
+# regular expression", which races on a transient snackbar) instead of letting
+# them randomly fail. This removes the floating pass/fail behaviour.
+ENV CI=true
+
 RUN apt-get update && \\
   apt-get install -y --no-install-recommends \\
   curl \\
@@ -64,8 +72,7 @@ RUN apt-get update && \\
   libncurses6 \\
   libvulkan1 \\
   libpulse0 \\
-  libgl1 \\
-  libxml2 && \\
+  libgl1 && \\
   apt-get clean && \\
   rm -rf /var/lib/apt/lists/*
 
